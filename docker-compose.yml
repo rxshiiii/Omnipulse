@@ -1,0 +1,43 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: omnipulse
+      POSTGRES_USER: omnipulse
+      POSTGRES_PASSWORD: omnipulse123
+    ports: ['5432:5432']
+    volumes: ['postgres_data:/var/lib/postgresql/data']
+
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports: ['5672:5672', '15672:15672']
+    environment:
+      RABBITMQ_DEFAULT_USER: omnipulse
+      RABBITMQ_DEFAULT_PASS: omnipulse123
+
+  backend:
+    build: ./backend
+    ports: ['8000:8000']
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://omnipulse:omnipulse123@postgres:5432/omnipulse
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://omnipulse:omnipulse123@rabbitmq:5672/
+    depends_on: [postgres, redis, rabbitmq]
+    volumes: ['./backend:/app']
+    command: uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+  frontend:
+    build: ./frontend
+    ports: ['3000:3000']
+    env_file: .env
+    depends_on: [backend]
+    volumes: ['./frontend:/app', '/app/node_modules']
+
+volumes:
+  postgres_data:
