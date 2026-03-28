@@ -1,0 +1,109 @@
+# OmniPulse Docker publish + friend run guide
+
+# IMPORTANT
+# 1) Replace any old leaked API keys/tokens immediately.
+# 2) Never store real secrets in this file.
+
+
+############################################################
+# A) YOUR LAPTOP: Build and push multi-architecture images
+############################################################
+
+# Run from project root (where backend/ and frontend/ exist)
+cd /Users/rushikeshankaikar/Desktop/OmniPulse/omnipulse
+
+# Login to Docker Hub
+docker login -u rxshiii
+
+# Create and use a buildx builder (one-time)
+docker buildx create --name omnipulse-builder --use
+docker buildx inspect --bootstrap
+
+# Build + push backend image for Apple Silicon and Windows/Linux Intel
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t rxshiii/omnipulse-backend:latest \
+  -f backend/Dockerfile backend \
+  --push
+
+# Build + push frontend image for Apple Silicon and Windows/Linux Intel
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t rxshiii/omnipulse-frontend:latest \
+  -f frontend/Dockerfile frontend \
+  --push
+
+# Verify manifests include amd64 and arm64
+docker buildx imagetools inspect rxshiii/omnipulse-backend:latest
+docker buildx imagetools inspect rxshiii/omnipulse-frontend:latest
+
+
+############################################################
+# B) FRIEND LAPTOP (Windows PowerShell): Pull and run
+############################################################
+
+# 1) Pull images
+docker pull rxshiii/omnipulse-frontend:latest
+docker pull rxshiii/omnipulse-backend:latest
+
+# 2) Create network
+docker network create omnipulse-net
+
+# 3) Run dependencies
+docker run -d --name omnipulse-postgres --network omnipulse-net `
+  -e POSTGRES_DB=omnipulse `
+  -e POSTGRES_USER=omnipulse `
+  -e POSTGRES_PASSWORD=omnipulse123 `
+  -p 5432:5432 postgres:15
+
+docker run -d --name omnipulse-redis --network omnipulse-net `
+  -p 6379:6379 redis:7-alpine
+
+docker run -d --name omnipulse-rabbitmq --network omnipulse-net `
+  -e RABBITMQ_DEFAULT_USER=omnipulse `
+  -e RABBITMQ_DEFAULT_PASS=omnipulse123 `
+  -p 5672:5672 -p 15672:15672 rabbitmq:3-management-alpine
+
+# 4) Run backend (fill your own secret values)
+docker run -d --name omnipulse-backend --network omnipulse-net `
+  -p 8000:8000 `
+  -e DATABASE_URL=postgresql+asyncpg://omnipulse:omnipulse123@omnipulse-postgres:5432/omnipulse `
+  -e REDIS_URL=redis://omnipulse-redis:6379 `
+  -e RABBITMQ_URL=amqp://omnipulse:omnipulse123@omnipulse-rabbitmq:5672/ `
+  -e GROQ_API_KEY=YOUR_GROQ_API_KEY `
+  -e META_VERIFY_TOKEN=omnipulse_verify_123 `
+  -e META_ACCESS_TOKEN=YOUR_META_ACCESS_TOKEN `
+  -e TWILIO_ACCOUNT_SID=YOUR_TWILIO_ACCOUNT_SID `
+  -e TWILIO_AUTH_TOKEN=YOUR_TWILIO_AUTH_TOKEN `
+  -e SENDGRID_API_KEY=YOUR_SENDGRID_API_KEY `
+  -e TWITTER_BEARER_TOKEN=YOUR_TWITTER_BEARER_TOKEN `
+  -e BANK_ID=union_bank_demo `
+  rxshiii/omnipulse-backend:latest
+
+# 5) Run frontend
+docker run -d --name omnipulse-frontend --network omnipulse-net `
+  -p 3000:3000 `
+  -e REACT_APP_API_URL=http://localhost:8000 `
+  -e REACT_APP_WS_URL=ws://localhost:8000 `
+  rxshiii/omnipulse-frontend:latest
+
+# 6) Health checks
+curl http://localhost:8000/health
+# open in browser: http://localhost:3000
+
+
+############################################################
+# C) Troubleshooting
+############################################################
+
+# If containers fail, inspect logs
+docker logs omnipulse-backend --tail 100
+docker logs omnipulse-frontend --tail 100
+
+# If friend gets old images after you push a new one
+docker pull rxshiii/omnipulse-backend:latest
+docker pull rxshiii/omnipulse-frontend:latest
+
+# Stop and remove everything on friend machine
+docker rm -f omnipulse-frontend omnipulse-backend omnipulse-rabbitmq omnipulse-redis omnipulse-postgres
+docker network rm omnipulse-net
