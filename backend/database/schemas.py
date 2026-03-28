@@ -9,6 +9,8 @@ from pydantic import BaseModel
 class MessageEvent(BaseModel):
     customer_phone: str | None = None
     customer_email: str | None = None
+    customer_ref: str | None = None
+    customer_name: str | None = None
     channel: str
     content: str | None = None
     audio_url: str | None = None

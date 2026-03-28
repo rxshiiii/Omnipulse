@@ -12,36 +12,71 @@ async def resolve_customer(
     *,
     phone: str | None = None,
     email: str | None = None,
+    customer_ref: str | None = None,
+    customer_name: str | None = None,
     channel: str = "whatsapp",
 ) -> dict:
     bank_uuid = await resolve_bank_uuid(bank_id)
     async with AsyncSessionLocal() as session:
-        stmt = select(Customer).where(Customer.bank_id == bank_uuid)
-        if phone or email:
-            filters = []
-            if phone:
-                filters.append(Customer.phone == phone)
-            if email:
-                filters.append(Customer.email == email)
-            stmt = stmt.where(or_(*filters))
+        customer = None
 
-        result = await session.execute(stmt)
-        customer = result.scalar_one_or_none()
+        if customer_ref:
+            result = await session.execute(select(Customer).where(Customer.bank_id == bank_uuid))
+            for row in result.scalars().all():
+                attrs = row.attributes or {}
+                ref = attrs.get("customer_ref") or attrs.get("external_customer_id")
+                if ref and str(ref) == str(customer_ref):
+                    customer = row
+                    break
+
+        if phone or email:
+            if not customer:
+                stmt = select(Customer).where(Customer.bank_id == bank_uuid)
+                filters = []
+                if phone:
+                    filters.append(Customer.phone == phone)
+                if email:
+                    filters.append(Customer.email == email)
+                stmt = stmt.where(or_(*filters))
+
+                result = await session.execute(stmt)
+                customer = result.scalar_one_or_none()
 
         if not customer:
+            attributes = {}
+            if customer_ref:
+                attributes["customer_ref"] = str(customer_ref)
+
             customer = Customer(
                 bank_id=bank_uuid,
                 phone=phone,
                 email=email,
-                name="New Customer",
+                name=(customer_name.strip() if isinstance(customer_name, str) and customer_name.strip() else "New Customer"),
                 preferred_channel=channel,
-                attributes={},
+                attributes=attributes,
             )
             session.add(customer)
             await session.commit()
             await session.refresh(customer)
         else:
             customer.preferred_channel = channel
+            attrs = customer.attributes or {}
+            should_update = False
+            clean_name = customer_name.strip() if isinstance(customer_name, str) else ""
+            if clean_name and (not customer.name or customer.name == "New Customer"):
+                customer.name = clean_name
+                should_update = True
+            if customer_ref and attrs.get("customer_ref") != str(customer_ref):
+                attrs["customer_ref"] = str(customer_ref)
+                should_update = True
+            if phone and not customer.phone:
+                customer.phone = phone
+                should_update = True
+            if email and not customer.email:
+                customer.email = email
+                should_update = True
+            if should_update:
+                customer.attributes = attrs
             await session.commit()
 
         return {

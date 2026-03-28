@@ -100,6 +100,8 @@ async def _process_event(event: dict[str, Any]) -> None:
         event["bank_id"],
         phone=event.get("customer_phone"),
         email=event.get("customer_email"),
+        customer_ref=event.get("customer_ref"),
+        customer_name=event.get("customer_name"),
         channel=event["channel"],
     )
 
